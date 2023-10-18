@@ -1,114 +1,122 @@
+
+# !!! RUN THIS BEFORE QUERY !!!
 SET SESSION group_concat_max_len = 100000;
 
 WITH
-	paid_users AS
-		(SELECT
+	paid_users as
+	(
+		SELECT
 			user_id,
-			date_purchased AS first_purchase_date,
-			CASE 
+            MIN(date_purchased) as first_order_date,
+            CASE
 				WHEN purchase_type = 0 THEN 'Monthly'
-				WHEN purchase_type = 1 THEN 'Quarterly'
-				WHEN purchase_type = 2 THEN 'Yearly'
+                WHEN purchase_type = 1 THEN 'Quarterly'
+                WHEN purchase_type = 2 THEN 'Yearly'
                 ELSE 'Other'
-			END AS subscription_type,
-			purchase_price AS price
-		FROM
+			END as subscription_type,
+            purchase_price as price
+		FROM 
 			student_purchases
-		WHERE (user_id, date_purchased) IN 
-			(SELECT 
-				user_id,
-                MIN(date_purchased)
-			FROM
-				student_purchases
-			GROUP BY user_id) 
-				AND date_purchased BETWEEN '2023-01-01 00:00:00' AND '2023-03-31 23:59:59' AND purchase_price > 0
-        ORDER BY user_id),
-	visitor_user_id AS
-		(SELECT
-			fv.visitor_id,
-            p.user_id
-		FROM 
-			front_visitors fv
-				JOIN
-			paid_users p ON fv.user_id = p.user_id),
-    user_paths AS        
-		(SELECT
-			f.visitor_id,
-            vui.user_id,
-			f.session_id,
-			f.event_source_url,
-			f.event_destination_url,
-			f.event_date,
-            pu.subscription_type
+		GROUP BY user_id, subscription_type, price
+        HAVING
+			price > 0
+            AND
+            CAST(first_order_date as DATE) >= '2023-01-01'
+            AND
+            CAST(first_order_date as DATE) < '2023-04-01'
+	),
+    table_interactions as
+    (
+		SELECT
+			p.user_id,
+            i.visitor_id,
+            i.session_id,
+            i.event_source_url,
+            i.event_destination_url,
+            p.subscription_type
 		FROM
-			front_interactions f
+			paid_users p
 				JOIN
-			visitor_user_id vui ON f.visitor_id = vui.visitor_id
+			front_visitors v ON p.user_id = v.user_id
 				JOIN
-			paid_users pu ON vui.user_id = pu.user_id),
-	event_and_source_url AS
-		(SELECT
+			front_interactions i ON v.visitor_id = i.visitor_id
+		WHERE
+			i.event_date < p.first_order_date
+	),
+    table_aliases as
+    (
+		SELECT
+			user_id,
             session_id,
-            CASE event_source_url
-				WHEN 'https://365datascience.com/' THEN 'Homepage'
-				WHEN 'https://365datascience.com/login/' THEN 'Log in'
-				WHEN 'https://365datascience.com/signup/' THEN 'Sign up'
-				WHEN 'https://365datascience.com/resources-center/' THEN 'Resources center'
-				WHEN 'https://365datascience.com/courses/' THEN 'Courses'
-				WHEN 'https://365datascience.com/career-tracks/' THEN 'Career tracks'
-				WHEN 'https://365datascience.com/upcoming-courses/' THEN 'Upcoming courses'
-				WHEN 'https://365datascience.com/career-track-certificate/' THEN 'Career track certificate'
-				WHEN 'https://365datascience.com/course-certificate/' THEN 'Course certificate'
-				WHEN 'https://365datascience.com/success-stories/' THEN 'Success stories'
-				WHEN 'https://365datascience.com/blog/' THEN 'Blog'
-				WHEN 'https://365datascience.com/pricing/' THEN 'Pricing'
-				WHEN 'https://365datascience.com/about-us/' THEN 'About us'
-				WHEN 'https://365datascience.com/instructors/' THEN 'Instructors'
-				WHEN 'https://365datascience.com/checkout/ and contains coupon' THEN 'Coupon'
-				WHEN 'https://365datascience.com/checkout/ and does not contain coupon' THEN 'Checkout'
+            subscription_type,
+            CASE
+				WHEN event_source_url = 'https://365datascience.com/' THEN 'Homepage'
+				WHEN event_source_url LIKE 'https://365datascience.com/login/%' THEN 'Log in'
+				WHEN event_source_url LIKE 'https://365datascience.com/signup/%' THEN 'Sign up'
+				WHEN event_source_url LIKE 'https://365datascience.com/resources-center/%' THEN 'Resources center'
+				WHEN event_source_url LIKE 'https://365datascience.com/courses/%' THEN 'Courses'
+				WHEN event_source_url LIKE 'https://365datascience.com/career-tracks/%' THEN 'Career tracks'
+				WHEN event_source_url LIKE 'https://365datascience.com/upcoming-courses/%' THEN 'Upcoming courses'
+				WHEN event_source_url LIKE 'https://365datascience.com/career-track-certificate/%' THEN 'Career track certificate'
+				WHEN event_source_url LIKE 'https://365datascience.com/course-certificate/%' THEN 'Course certificate'
+				WHEN event_source_url LIKE 'https://365datascience.com/success-stories/%' THEN 'Success stories'
+				WHEN event_source_url LIKE 'https://365datascience.com/blog/%' THEN 'Blog'
+				WHEN event_source_url LIKE 'https://365datascience.com/pricing/%' THEN 'Pricing'
+				WHEN event_source_url LIKE 'https://365datascience.com/about-us/%' THEN 'About us'
+				WHEN event_source_url LIKE 'https://365datascience.com/instructors/%' THEN 'Instructors'
+				WHEN event_source_url LIKE 'https://365datascience.com/checkout/%' AND event_source_url LIKE '%coupon%' THEN 'Coupon'
+				WHEN event_source_url LIKE 'https://365datascience.com/checkout/%' AND event_source_url NOT LIKE '%coupon%' THEN 'Checkout'
 				ELSE 'Other'
-			END AS event_source_url,
-			CASE event_destination_url
-				WHEN 'https://365datascience.com/' THEN 'Homepage'
-				WHEN 'https://365datascience.com/login/' THEN 'Log in'
-				WHEN 'https://365datascience.com/signup/' THEN 'Sign up'
-				WHEN 'https://365datascience.com/resources-center/' THEN 'Resources center'
-				WHEN 'https://365datascience.com/courses/' THEN 'Courses'
-				WHEN 'https://365datascience.com/career-tracks/' THEN 'Career tracks'
-				WHEN 'https://365datascience.com/upcoming-courses/' THEN 'Upcoming courses'
-				WHEN 'https://365datascience.com/career-track-certificate/' THEN 'Career track certificate'
-				WHEN 'https://365datascience.com/course-certificate/' THEN 'Course certificate'
-				WHEN 'https://365datascience.com/success-stories/' THEN 'Success stories'
-				WHEN 'https://365datascience.com/blog/' THEN 'Blog'
-				WHEN 'https://365datascience.com/pricing/' THEN 'Pricing'
-				WHEN 'https://365datascience.com/about-us/' THEN 'About us'
-				WHEN 'https://365datascience.com/instructors/' THEN 'Instructors'
-				WHEN 'https://365datascience.com/checkout/ and contains coupon' THEN 'Coupon'
-				WHEN 'https://365datascience.com/checkout/ and does not contain coupon' THEN 'Checkout'
+			END as source_page_alias,
+			CASE
+				WHEN event_destination_url = 'https://365datascience.com/' THEN 'Homepage'
+				WHEN event_destination_url LIKE 'https://365datascience.com/login/%' THEN 'Log in'
+				WHEN event_destination_url LIKE 'https://365datascience.com/signup/%' THEN 'Sign up'
+				WHEN event_destination_url LIKE 'https://365datascience.com/resources-center/%' THEN 'Resources center'
+				WHEN event_destination_url LIKE 'https://365datascience.com/courses/%' THEN 'Courses'
+				WHEN event_destination_url LIKE 'https://365datascience.com/career-tracks/%' THEN 'Career tracks'
+				WHEN event_destination_url LIKE 'https://365datascience.com/upcoming-courses/%' THEN 'Upcoming courses'
+				WHEN event_destination_url LIKE 'https://365datascience.com/career-track-certificate/%' THEN 'Career track certificate'
+				WHEN event_destination_url LIKE 'https://365datascience.com/course-certificate/%' THEN 'Course certificate'
+				WHEN event_destination_url LIKE 'https://365datascience.com/success-stories/%' THEN 'Success stories'
+				WHEN event_destination_url LIKE 'https://365datascience.com/blog/%' THEN 'Blog'
+				WHEN event_destination_url LIKE 'https://365datascience.com/pricing/%' THEN 'Pricing'
+				WHEN event_destination_url LIKE 'https://365datascience.com/about-us/%' THEN 'About us'
+				WHEN event_destination_url LIKE 'https://365datascience.com/instructors/%' THEN 'Instructors'
+				WHEN event_destination_url LIKE 'https://365datascience.com/checkout/%' AND event_destination_url LIKE '%coupon%' THEN 'Coupon'
+				WHEN event_destination_url LIKE 'https://365datascience.com/checkout/%' AND event_destination_url NOT LIKE '%coupon%' THEN 'Checkout'
 				ELSE 'Other'
-			END AS event_destination_url
+			END as destination_page_alias
 		FROM
-			user_paths),
-	combined_url AS
-		(SELECT
-			esu.session_id,
-			CONCAT(esu.event_source_url, '-', esu.event_destination_url) AS source_to_destination
+			table_interactions
+	),
+    table_concatenated as
+    (
+		SELECT
+			user_id,
+            session_id,
+            subscription_type,
+            CONCAT(source_page_alias, 
+            '-',
+            destination_page_alias) as source_destination
 		FROM 
-			event_and_source_url esu),
-	session_url AS
-		(SELECT
-			cu.session_id,
-			GROUP_CONCAT(cu.source_to_destination SEPARATOR '-') AS session_url
+			table_aliases
+    ),
+    table_group_concatenated as
+	(
+		SELECT
+			user_id,
+            session_id,
+            subscription_type,
+            GROUP_CONCAT(source_destination SEPARATOR '-') as user_journey
 		FROM
-			combined_url cu
-		GROUP BY cu.session_id)
+			table_concatenated
+		GROUP BY session_id, user_id, subscription_type
+    )
 SELECT
-	up.user_id,
-    su.session_id,
-    up.subscription_type,
-    su.session_url
+	*
 FROM
-	session_url su
-		JOIN
-	user_paths up ON su.session_id = up.session_id
-ORDER BY user_id;
+	table_group_concatenated
+ORDER BY user_id, session_id;
+
+		
